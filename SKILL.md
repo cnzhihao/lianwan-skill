@@ -26,8 +26,8 @@
 |---|---|---|
 | ① | 预告即将创建绑定请求 | 「我将创建一个绑定请求，请用微信扫码，并在小程序里点确认。」 |
 | ② | 运行 `lianwan bind` | — |
-| ③ | 终端输出二维码 + 8 位绑定码（10 分钟内有效、一次性） | 「请用手机微信『扫一扫』扫描终端里的二维码；扫码不便的话，打开小程序『设置 → AI 助手 → 手动输码』，输入这个 8 位绑定码。」 |
-| ④ | 等待命令完成（CLI 轮询最长约 11 分钟；二维码不可用时终端会提示改走手动输码） | 「我在等你在手机上确认，确认后令牌会自动保存到本机。」 |
+| ③ | 终端输出二维码 + 8 位绑定码（10 分钟内有效、一次性） | 「绑定码是 <这个 8 位码>。推荐直接打开小程序『设置 → AI 助手 → 手动输码』输入（最可靠）；用微信『扫一扫』扫终端二维码也可以（二维码在你的终端上，手机看不到时可截屏或走手输）。」 |
+| ④ | 等待命令完成（CLI 轮询最长约 11 分钟；二维码不可用时终端会提示改走手动输码）。💡 若你是异步会话（无法阻塞等待）：先向用户报告绑定码并说明「确认后我会稍后验证」，不要挂起——稍后跑 `lianwan context --days 7`，能正常返回即绑定已生效 | 「绑定码已发出，你在小程序确认后告诉我，我稍后验证。」 |
 | ⑤ | 确认令牌已写入 `~/.lianwan/config.json`（权限 0600）→ 运行 `lianwan context --days 28` 验证链路通 | 「绑定完成！我已经能读到你的训练数据了：<用一句话汇报你看到了什么>。」 |
 
 绑定码过期（CODE_EXPIRED）时重新运行 `lianwan bind` 生成新码，不要复用旧码。
@@ -45,7 +45,7 @@
 
 ## 5. context 输出结构摘要
 
-`lianwan context` 输出 JSON，顶层共 6 块：
+`lianwan context` 输出 JSON，顶层共 7 块：
 
 1. `exercises` — 动作库（_id/name/bodyPart/disabled/mode 等）；mode=sec 表示计时类动作，其 reps 字段存秒数。
 2. `templates` — 训练模板（name/note/items[]）；items 元素 = { exerciseId, order, sets, reps, weight, rpe, note }。
@@ -53,6 +53,8 @@
 4. `sessions` — 近期训练记录；exercises[].sets[] 含计划值（pWeight/pReps）与实际值（aWeight/aReps）。
 5. `settings` — 偏好（weightUnit 存储恒为 kg；restSec 组间休息秒数）。
 6. `derived` — 派生统计（CLI 用与小程序完全相同的算法计算）：periodStats、streakDays、weeklyVolume、exerciseBest（各动作 PR）、exerciseTotals、weekHeatmap。
+7. `builtinCatalog` — 产品预置动作目录（39 个）：key/name/bodyPart/note/mode/sets/reps/weight/home 完整定义，每条带 `materialized`（同名动作是否已在用户动作库）、`exerciseId`（已实体化时 = 可直接引用的 _id）、`disabled`（已实体化且停用时 true）。
+   指引：`materialized=true` 优先直接用 `exerciseId` 引用；`materialized=false` 用 `builtinKey` 引用（写回时网关自动把该动作加入用户动作库）；`disabled=true` 不可引用——请用户在小程序动作库启用后重试。目录固定 39 条，不随用户数据增长，无截断语义。
 
 **truncated 语义**：某集合条数超上限时被截断，`truncated.<collection> = true`——
 需要更早的数据时换更小的 `--days` 重新拉取，不要假设拿到了全量。
@@ -74,15 +76,15 @@ plan.json 顶层结构：
 
 - `idemKey`：本次写入的幂等键（1..64 字符）——网络失败重试必须复用同一值，服务端保证不重复写入（24h 有效）。
 - `weekStart`：目标周的周一（YYYY-MM-DD）。
-- `plan`：1..14 条，每条一天一条排期 { date, name, template?, templateId?, note? }——`name` 必填（1..30 字，展示名）；
-  date 必须落在 weekStart..weekStart+6。
+- `plan`：1..14 条，同日可多条堆叠 { date, name, template?, templateId?, note? }——`name` 必填（1..30 字，展示名）；
+  date 必须落在 weekStart..weekStart+6；同一天多条排期请拆成多条 plan 条目（同日堆叠展示）。
 - 每条排期二选一：`template`（内联新模板 { name, note?, items }，写回时自动创建）或 `templateId`（引用 context 里已有模板 id）。
-- 模板 items：1..12 条 { exerciseId, order, sets, reps, weight, rpe?, note? }。
+- 模板 items：1..12 条，每条二选一：`exerciseId` 或 `builtinKey`（带 order/sets/reps/weight/rpe?/note?）。
 
 关键规则五条：
 
 1. **只写未来**：weekStart 必须为周一；排期日期必须 ≥ 今天，禁止写过去。
-2. **只引用已有动作**：exerciseId 必须来自 context 的 exercises 且未停用（disabled ≠ true）——不允许创建新动作；sets 1..20；reps ≥ 0（计时动作此处填秒数）；weight ≥ 0（kg）。
+2. **只引用已有动作或预置目录**：每条 item 二选一——`exerciseId` 必须来自 context 的 exercises 且未停用（disabled ≠ true）；或 `builtinKey` 引用 builtinCatalog 里的预置动作（写回时网关自动加入用户动作库，同名已存在则直接复用；sets/reps/weight 可缺省，缺省取目录默认值；同名已停用则拒收，请用户在小程序动作库启用后重试）——AI 不能凭空造动作，能引用的只有动作库已有动作与产品预置目录；sets 1..20；reps ≥ 0（计时动作此处填秒数）；weight ≥ 0（kg）。
 3. **占用默认拒绝**：目标周已有未跳过（status ≠ skipped）排期时返回 HTTP 409 + 冲突清单——把冲突给用户看，确认要覆盖后才加 `--replace`。
 4. **`--replace` 只删「计划中」**：只删除 planned 状态的旧条目，训练中 / 已完成 / 已跳过的一律保留（响应 kept 清单可核对）。
 5. **幂等**：网络失败重试必须复用同一 idemKey（24h 有效）。

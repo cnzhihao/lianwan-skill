@@ -84,7 +84,7 @@ plan.json 顶层结构：
 关键规则五条：
 
 1. **只写未来**：weekStart 必须为周一；排期日期必须 ≥ 今天，禁止写过去。
-2. **只引用已有动作或预置目录**：每条 item 二选一——`exerciseId` 必须来自 context 的 exercises 且未停用（disabled ≠ true）；或 `builtinKey` 引用 builtinCatalog 里的预置动作（写回时网关自动加入用户动作库，同名已存在则直接复用；sets/reps/weight 可缺省，缺省取目录默认值；同名已停用则拒收，请用户在小程序动作库启用后重试）——AI 不能凭空造动作，能引用的只有动作库已有动作与产品预置目录；sets 1..20；reps ≥ 0（计时动作此处填秒数）；weight ≥ 0（kg）。
+2. **只引用已有动作或预置目录**：每条 item 二选一——`exerciseId` 必须来自 context 的 exercises 且未停用（disabled ≠ true）；或 `builtinKey` 引用 builtinCatalog 里的预置动作（写回时网关自动加入用户动作库，同名已存在则直接复用；sets/reps/weight 可缺省，缺省取目录默认值；同名已停用则拒收，请用户在小程序动作库启用后重试）——AI 不能凭空造动作，能引用的只有动作库已有动作与产品预置目录；sets 1..20；reps ≥ 0（计时动作此处填秒数）；weight 为 kg，0 = 自重，负数 = 辅助减重（如 -15 = 辅助引体借力 15kg，辅助越少越接近 0 即进步）。
 3. **占用默认拒绝**：目标周已有未跳过（status ≠ skipped）排期时返回 HTTP 409 + 冲突清单——把冲突给用户看，确认要覆盖后才加 `--replace`。
 4. **`--replace` 只删「计划中」**：只删除 planned 状态的旧条目，训练中 / 已完成 / 已跳过的一律保留（响应 kept 清单可核对）。
 5. **幂等**：网络失败重试必须复用同一 idemKey（24h 有效）。
